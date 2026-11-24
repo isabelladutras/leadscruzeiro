@@ -231,6 +231,7 @@ input[type=file]{font-size:.88rem;max-width:100%}
     </div>
     <div class="row">
       <span class="userbar"><span id="userLbl"></span><button class="btn ghost" type="button" id="btnSair">Sair</button></span>
+      <button class="btn" id="btnImportarTopo" type="button" hidden>Importar planilha</button>
       <button class="btn primary" id="btnNovo" type="button">+ Novo lead</button>
     </div>
   </header>
@@ -1301,7 +1302,7 @@ function renderConfig(force){
       ${lx.length ? `<p class="tplhelp">Leads excluídos ficam aqui por 30 dias e depois são apagados de vez. O número continua bloqueado: não volta por planilha nem por cadastro. Restaurar libera o número.</p>` + lx.slice(0,50).map(l=>`<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:6px"><span>${esc(nomeExib(l))} · ${esc(phoneFmt(l.telefone))} · excluído ${l.excluidoEm?brAno(l.excluidoEm):""}${l.excluidoPor?` por ${esc(l.excluidoPor)}`:""}${l.juntadoCom?" (juntado)":""}</span><span class="row"><button class="btn" type="button" data-restaura="${esc(l.id)}">Restaurar</button><button class="btn ghost danger" type="button" data-apaga="${esc(l.id)}">Apagar de vez</button></span></div>`).join("") : `<p class="note">Lixeira vazia.</p>`}
     </section>
     <section class="panel">
-      <h3 class="sec">Importar leads</h3>
+      <h3 class="sec" id="secImportar">Importar leads</h3>
       <p class="tplhelp">Envie a planilha (.xlsx ou .csv) ou cole as linhas copiadas do Excel, com a linha de títulos. Colunas aceitas: Nome, WhatsApp, Curso, Vendedora, Origem, Situação, Próximo contato, Observações, Motivo, Data matrícula, Vencimento. Só Nome e WhatsApp são obrigatórios. WhatsApps que já estão no painel são pulados.</p>
       <div class="row"><button class="btn" type="button" id="btnModelo">Baixar modelo (Excel)</button><input type="file" id="impFile" accept=".xlsx,.xls,.csv"></div>
       <label class="f">Ou cole aqui<textarea id="impText" placeholder="Nome&#9;WhatsApp&#9;Curso&#9;Vendedora…">${esc(impText)}</textarea></label>
@@ -1990,6 +1991,12 @@ document.getElementById("fTel").addEventListener("input", e=>{ dupOk = false; co
   if(dp){ w.hidden = false; w.innerHTML = `<span>${esc(dupTxt(dp))}</span>`; } else w.hidden = true; });
 document.getElementById("dupWarn").addEventListener("click", e=>{ if(e.target.id==="dupSave"){ dupOk = true; form.requestSubmit(); } });
 function montarCursoForm(){ const b = document.getElementById("fCursoBox"); if(b) b.innerHTML = cursoSel("fCurso", ""); }
+document.getElementById("btnImportarTopo").addEventListener("click", ()=>{
+  const t = document.querySelector('.tab[data-tab="config"]'); if(!t) return; t.click();
+  setTimeout(()=>{ const h = document.getElementById("secImportar"); if(!h) return; const sec = h.closest(".panel") || h;
+    sec.scrollIntoView({behavior:"smooth", block:"start"}); sec.style.boxShadow = "0 0 0 2px var(--accent)"; setTimeout(()=>{ sec.style.boxShadow = ""; }, 2500);
+    const f = document.getElementById("impFile"); if(f) f.focus({preventScroll:true}); }, 60);
+});
 document.getElementById("btnNovo").addEventListener("click", ()=>{ montarCursoForm(); form.hidden = !form.hidden; if(!form.hidden){ syncExtras(); document.getElementById("fNome").focus(); } });
 document.getElementById("btnCancelar").addEventListener("click", ()=>{ form.reset(); form.hidden = true; dupOk = false; document.getElementById("dupWarn").hidden = true; });
 form.addEventListener("submit", async e=>{
@@ -2037,6 +2044,7 @@ function atualizarAdmin(){
   document.querySelectorAll(".tab").forEach(b=>{ if(!b.classList.contains("adm")) b.hidden = perm && b.dataset.tab!=="pos"; });
   document.querySelectorAll(".tlabel").forEach(x=>x.hidden = perm);
   ["btnNovo","metaStrip"].forEach(i=>{ const el = document.getElementById(i); if(el) el.hidden = perm; });
+  { const bi = document.getElementById("btnImportarTopo"); if(bi) bi.hidden = !adm; }
   if(perm && tab!=="pos"){ tab = "pos"; document.querySelectorAll(".tab").forEach(x=>x.setAttribute("aria-selected", x.dataset.tab==="pos")); render(); return; }
   if(!adm && (tab==="equipe" || tab==="config")){ tab = "inicio"; document.querySelectorAll(".tab").forEach(x=>x.setAttribute("aria-selected", x.dataset.tab==="inicio")); render(); }
 }
