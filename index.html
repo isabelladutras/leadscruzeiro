@@ -1306,9 +1306,12 @@ function renderConfig(force){
       <p class="tplhelp">Envie a planilha (.xlsx ou .csv) ou cole as linhas copiadas do Excel, com a linha de títulos. Colunas aceitas: Nome, WhatsApp, Curso, Vendedora, Origem, Situação, Próximo contato, Observações, Motivo, Data matrícula, Vencimento. Só Nome e WhatsApp são obrigatórios. WhatsApps que já estão no painel são pulados.</p>
       <div class="row"><button class="btn" type="button" id="btnModelo">Baixar modelo (Excel)</button><input type="file" id="impFile" accept=".xlsx,.xls,.csv"></div>
       <label class="f">Ou cole aqui<textarea id="impText" placeholder="Nome&#9;WhatsApp&#9;Curso&#9;Vendedora…">${esc(impText)}</textarea></label>
-      <div class="grid2"><label class="f">Vendedora para linhas sem vendedora<select id="impResp">${equipe.map(n=>`<option>${esc(n)}</option>`).join("")}</select></label></div>
+      <div class="grid2"><label class="f">Linhas sem vendedora na planilha<select id="impResp"><option value="__dividir__" selected>Dividir entre todas as vendedoras (${equipe.length})</option>${equipe.map(n=>`<option>${esc(n)}</option>`).join("")}</select></label></div>
       <div class="row"><button class="btn primary" type="button" id="btnConferir">Conferir planilha</button></div>
       <div id="impResult">${impResultHTML()}</div>
+      ${(()=>{ const v = leads.filter(ehVirgemImportado); if(!v.length) return ""; const por = {}; for(const l of v){ const q = donaDe(l)||"sem fila"; por[q] = (por[q]||0)+1; }
+        return `<div class="stagebox"><p class="tplhelp" style="color:var(--ink)"><b>${v.length}</b> lead(s) importado(s) ainda não chamado(s): ${Object.entries(por).map(([q,n])=>`${esc(q)} ${n}`).join(" · ")}</p>
+        <div class="row"><button class="btn primary" type="button" id="btnRedividir">Dividir igualmente entre ${equipe.length} vendedoras (até ${LIMITE_DIA} por dia cada)</button></div></div>`; })()}
     </section>
     <section class="panel">
       <h3 class="sec">Metas de matrícula · ${mesNome()}</h3>
@@ -1370,13 +1373,15 @@ function dateFrom(v){
     const d = new Date(y, Number(m[2])-1, Number(m[1])); if(d.getMonth()!==Number(m[2])-1) return null; return fmtISO(d); }
   return null;
 }
+const DIVIDIR = "__dividir__";
+const ehVirgemImportado = l => l.etapa==="novo" && !(l.tentativas>0) && !l.ultimoEnvio && (l.historico||[]).length>0 && /importado da planilha/.test((l.historico[0]||{}).acao||"") && (l.historico||[]).every(h=>/importado da planilha|^fila: |^dividido/.test(h.acao||""));
 function parseRows(rows, def){
   if(!rows.length) return {erro:"Nenhuma linha encontrada. Confira se a primeira linha tem os títulos das colunas."};
   const map = mapHeaders(Object.keys(rows[0]));
   if(!map.nome || !map.telefone) return {erro:"Não achei as colunas Nome e WhatsApp. Confira a linha de títulos."};
   const g = (r,f) => map[f] ? r[map[f]] : "";
   const ok = [], dup = [], bad = []; const vistos = new Set();
-  const carga = {}; // vagas já usadas por vendedora/dia nesta importação
+  let rodada = 0; const carga = {}; // vagas já usadas por vendedora/dia nesta importação
   const vaga = quem => { let x = semDomingo(today());
     for(let i=0; i<365; i++){ const k = quem+"|"+x; if(cargaDia(quem, x) + (carga[k]||0) < LIMITE_DIA){ carga[k] = (carga[k]||0)+1; return x; } x = semDomingo(addDays(x,1)); }
     return semDomingo(today()); };
@@ -1394,10 +1399,12 @@ function parseRows(rows, def){
       if(!x.primeiroBoleto && !(x.diaVencimento>=1 && x.diaVencimento<=31)){ bad.push({linha, nome, motivo:"matriculado sem data do 1º boleto"}); return; } }
     if(st==="agendado"){ if(!prox){ bad.push({linha, nome, motivo:"pediu contato sem data no Próximo contato"}); return; } x.pedidoData = prox; x.pedidoMotivo = ""; }
     if(STAGES[st].motivo) x.motivoPerda = motivoFrom(g(r,"motivo"));
-    const base = {nome, telefone:tel, curso:String(g(r,"curso")||"").trim(), responsavel:respFrom(g(r,"responsavel"), def),
+    const rr = respFrom(g(r,"responsavel"), def===DIVIDIR ? "" : def);
+    const fila = !rr && def===DIVIDIR && equipe.length ? equipe[(rodada++) % equipe.length] : null;
+    const base = {nome, telefone:tel, curso:String(g(r,"curso")||"").trim(), responsavel:rr, ...(fila ? {filaDe:fila} : {}),
       origem: String(g(r,"indicadoPor")||"").trim() && !String(g(r,"origem")||"").trim() ? "Indicação" : origemFrom(g(r,"origem")),
       indicadoPor:String(g(r,"indicadoPor")||"").trim(), indicadoPorId:alunoId(g(r,"indicadoPor")), obs:String(g(r,"obs")||"").trim(), criadoEm:new Date().toISOString(), ultimoEnvio:null};
-    const d = stageData(base, st, x); if(prox && !needsExtras(st)) d.proximo = prox; else if(st==="novo") d.proximo = vaga(base.responsavel || "");
+    const d = stageData(base, st, x); if(prox && !needsExtras(st)) d.proximo = prox; else if(st==="novo") d.proximo = vaga(base.responsavel || base.filaDe || "");
     ok.push({...base, ...d, historico:[{data:today(), acao:`importado da planilha · ${stageHist(st, x)}`}]});
   });
   return {ok, dup, bad};
@@ -1458,6 +1465,22 @@ document.getElementById("config").addEventListener("click", async e=>{
     try{ const wb = XLSX.read(impText, {type:"string", raw:true}); impParsed = parseRows(readSheetRows(wb), document.getElementById("impResp").value); }
     catch(err){ impParsed = {erro:"Não consegui ler o texto colado. Copie direto do Excel, incluindo a linha de títulos."}; }
     showImp();
+  }
+  if(id==="btnRedividir" && !importing){
+    const alvo = leads.filter(ehVirgemImportado).sort((a,b)=>String(a.criadoEm||"").localeCompare(String(b.criadoEm||"")) || String(a.nome).localeCompare(b.nome));
+    if(!alvo.length || !equipe.length) return;
+    importing = true; e.target.disabled = true;
+    const ids = new Set(alvo.map(l=>l.id)), t = today(); const cont = {};
+    for(const o of leads) if(!ids.has(o.id) && o.proximo){ const q = donaDe(o); if(!q) continue; const dd = o.proximo<t ? t : o.proximo; cont[q+"|"+dd] = (cont[q+"|"+dd]||0)+1; }
+    const slot = q => { let x = semDomingo(t); for(let i=0;i<365;i++){ const k = q+"|"+x; if((cont[k]||0) < LIMITE_DIA){ cont[k] = (cont[k]||0)+1; return x; } x = semDomingo(addDays(x,1)); } return semDomingo(t); };
+    let n = 0;
+    for(const [i,l] of alvo.entries()){
+      const q = equipe[i % equipe.length], x = slot(q);
+      try{ await db.collection("leads").doc(l.id).update({responsavel:"", filaDe:q, proximo:x, historico:[...(l.historico||[]), {data:t, acao:`dividido: fila de ${q}`}]}); n++; }
+      catch(err){ toast("Parou no meio. Clique de novo para continuar."); break; }
+      e.target.textContent = `Dividindo… ${n} de ${alvo.length}`;
+    }
+    importing = false; renderConfig(true); toast(`${n} lead(s) divididos entre ${equipe.length} vendedoras, até ${LIMITE_DIA} por dia cada, começando hoje`); return;
   }
   if(id==="btnImportar" && impParsed && impParsed.ok && !importing){
     importing = true; showImp(); let n = 0;
@@ -2085,7 +2108,7 @@ async function migrarFluxo(){
 async function puxarImportados(){
   if(!db || !podeGerir()) return 0;
   const t = today(), hoje = semDomingo(t);
-  const virgem = l => l.etapa==="novo" && !(l.tentativas>0) && !l.ultimoEnvio && l.proximo && l.proximo>hoje && (l.historico||[]).length===1 && /importado da planilha/.test((l.historico[0]||{}).acao||"");
+  const virgem = l => ehVirgemImportado(l) && l.proximo && l.proximo>hoje;
   const quem = [...new Set(leads.filter(virgem).map(donaDe))]; let movidos = 0;
   for(const q of quem){
     const fila = leads.filter(l=>virgem(l) && donaDe(l)===q).sort((a,b)=>a.proximo.localeCompare(b.proximo) || String(a.criadoEm||"").localeCompare(String(b.criadoEm||"")));
